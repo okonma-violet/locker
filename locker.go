@@ -22,7 +22,7 @@ type LockableDir struct {
 	locked bool
 	path   string
 	mux    sync.Mutex
-	ctx    context.Context
+	// ctx    context.Context
 }
 
 type Locakble interface {
@@ -39,7 +39,10 @@ func NewLockableDir(ctx context.Context, dirpath string) (Locakble, error) {
 	if !st.IsDir() {
 		return nil, errors.New("not a dir")
 	}
-	return &LockableDir{path: dirpath + "/"}, nil
+	return &LockableDir{
+		path: dirpath + "/",
+		// ctx:  ctx,
+	}, nil
 }
 
 // checks dir not locked
@@ -47,24 +50,24 @@ func (ld *LockableDir) Lock() error {
 	ld.mux.Lock()
 	defer ld.mux.Unlock()
 
-	select {
-	case <-ld.ctx.Done():
-		return errors.New("ctx done")
-	default:
-		if lck, owner := ld.checkLock(); !lck {
-			if f, err := os.Create(ld.path + LockfileName); err != nil {
-				return err
-			} else {
-				f.Close()
-				ld.locked = true
-				return nil
-			}
-		} else if owner {
-			return ErrLocked
+	// select {
+	// case <-ld.ctx.Done():
+	// 	return errors.New("ctx done")
+	// default:
+	if lck, owner := ld.checkLock(); !lck {
+		if f, err := os.Create(ld.path + LockfileName); err != nil {
+			return err
 		} else {
-			return ErrLockedByOthers
+			f.Close()
+			ld.locked = true
+			return nil
 		}
+	} else if owner {
+		return ErrLocked
+	} else {
+		return ErrLockedByOthers
 	}
+	// }
 
 }
 
@@ -72,30 +75,29 @@ func (ld *LockableDir) Unlock() error {
 	ld.mux.Lock()
 	defer ld.mux.Unlock()
 
-	select {
-	case <-ld.ctx.Done():
-		return errors.New("ctx done")
-	default:
-		if lck, owner := ld.checkLock(); lck {
-			if owner {
-				if err := os.Remove(ld.path + LockfileName); err == nil {
-					ld.locked = false
-					return nil
-				} else if errors.Is(err, fs.ErrNotExist) {
-					ld.locked = false
-					return ErrNotLocked
-				} else {
-					return err
-				}
+	// select {
+	// case <-ld.ctx.Done():
+	// 	return errors.New("ctx done")
+	// default:
+	if lck, owner := ld.checkLock(); lck {
+		if owner {
+			if err := os.Remove(ld.path + LockfileName); err == nil {
+				ld.locked = false
+				return nil
+			} else if errors.Is(err, fs.ErrNotExist) {
+				ld.locked = false
+				return ErrNotLocked
+			} else {
+				return err
 			}
-			return ErrLockedByOthers
-		} else if owner {
-			ld.locked = false
-			return ErrNotLocked
 		}
+		return ErrLockedByOthers
+	} else if owner {
+		ld.locked = false
 		return ErrUnlockedByOthers
 	}
-
+	return ErrNotLocked
+	// }
 }
 
 // return: locked bool, bythisservice bool
@@ -126,27 +128,23 @@ func (ld *LockableDir) CheckLocked() (bool, bool) {
 func (ld *LockableDir) TryLock(timeout time.Duration, times int) error {
 	var err error
 	for i := 0; i < times; i++ {
-		ld.mux.Lock()
 		if err = ld.Lock(); err != nil {
-			ld.mux.Unlock()
 			if err == ErrLocked || err == ErrLockedByOthers {
 				time.Sleep(timeout)
 			} else {
 				return err
 			}
 		} else {
-			ld.locked = true
-			ld.mux.Unlock()
 			return nil
 		}
 	}
 	return err
 }
 
-// checks dir not locked
+// checks dir not locked and locks it
 func Lock(path string) error {
 	if !CheckLocked(path) {
-		_, err := os.Create(path + "/" + LockfileName)
+		_, err := os.Create(path + LockfileName)
 		return err
 	} else {
 		return ErrLocked
@@ -154,7 +152,7 @@ func Lock(path string) error {
 }
 
 func Unlock(path string) error {
-	if err := os.Remove(path + "/" + LockfileName); errors.Is(err, fs.ErrNotExist) {
+	if err := os.Remove(path + LockfileName); errors.Is(err, fs.ErrNotExist) {
 		return ErrNotLocked
 	} else {
 		return err
@@ -162,7 +160,7 @@ func Unlock(path string) error {
 }
 
 func CheckLocked(path string) bool {
-	if _, err := os.Stat(path + "/" + LockfileName); err != nil {
+	if _, err := os.Stat(path + LockfileName); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return false
 		}
